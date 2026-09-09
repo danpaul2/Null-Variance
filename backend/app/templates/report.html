@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>NAWI Test Report - {{ session.id }}</title>
+    <style>
+        {% include 'report_styles.css' %}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>NAWI Test Report - OIML R-76</h1>
+        <p><strong>Report ID:</strong> {{ session.id }}</p>
+        <p><strong>Date:</strong> {{ session.test_date }}</p>
+        <p><strong>Tester:</strong> {{ session.tester }}</p>
+        <p><strong>Laboratory / Location:</strong> {{ session.lab_location }}</p>
+    </div>
+
+    <div class="section">
+        <h2>Instrument Details</h2>
+        <table class="details-table">
+            <tr>
+                <th>Manufacturer</th><td>{{ instrument.manufacturer }}</td>
+                <th>Model</th><td>{{ instrument.model }}</td>
+            </tr>
+            <tr>
+                <th>Serial Number</th><td>{{ instrument.serial_number or 'N/A' }}</td>
+                <th>Accuracy Class</th><td>{{ instrument.accuracy_class.value }}</td>
+            </tr>
+            <tr>
+                <th>Max Capacity</th><td>{{ instrument.max_capacity }} kg</td>
+                <th>e (Verification Scale Interval)</th><td>{{ instrument.e_value }} kg</td>
+            </tr>
+            <tr>
+                <th>d (Scale Interval)</th><td>{{ instrument.d_value if instrument.d_value else instrument.e_value }} kg</td>
+                <th>Owner</th><td>{{ instrument.owner or 'N/A' }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Environmental Conditions</h2>
+        <p><strong>Temperature:</strong> {{ session.temperature }}</p>
+        <p><strong>Humidity:</strong> {{ session.humidity }}</p>
+    </div>
+
+    <div class="section">
+        <h2>Test Results</h2>
+        
+        <h3>Eccentricity Test</h3>
+        <p><strong>Test Load:</strong> {{ session.eccentricity.test_load }} kg</p>
+        <table class="results-table">
+            <thead>
+                <tr>
+                    <th>Position</th>
+                    <th>Applied Load (kg)</th>
+                    <th>Indication (kg)</th>
+                    <th>Error (kg)</th>
+                    <th>MPE (kg)</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in compliance.eccentricity.rows %}
+                <tr>
+                    <td>{{ row.label }}</td>
+                    <td>{{ row.applied_load }}</td>
+                    <td>{{ row.indication }}</td>
+                    <td>{{ row.error }}</td>
+                    <td>{{ row.mpe }}</td>
+                    <td class="status-{{ row.status.value | lower }}">{{ row.status.value }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p class="test-status"><strong>Eccentricity Status:</strong> <span class="status-{{ compliance.eccentricity.status.value | lower }}">{{ compliance.eccentricity.status.value }}</span></p>
+
+        <h3>Repeatability Test</h3>
+        <p><strong>Test Load:</strong> {{ session.repeatability.test_load }} kg</p>
+        <p><strong>Calculated Range:</strong> {{ compliance.repeatability.range_value }} kg</p>
+        <p><strong>MPE:</strong> {{ compliance.repeatability.mpe }} kg</p>
+        <p class="test-status"><strong>Repeatability Status:</strong> <span class="status-{{ compliance.repeatability.status.value | lower }}">{{ compliance.repeatability.status.value }}</span></p>
+
+        <h3>Discrimination Test</h3>
+        <p><strong>Test Load:</strong> {{ session.discrimination.test_load }} kg</p>
+        <p><strong>Reading Before:</strong> {{ session.discrimination.reading_before }} kg</p>
+        <p><strong>Increment Added:</strong> {{ session.discrimination.increment }} kg</p>
+        <p><strong>Reading After:</strong> {{ session.discrimination.reading_after }} kg</p>
+        <p><strong>Calculated Delta:</strong> {{ compliance.discrimination.delta }} kg</p>
+        <p><strong>Expected Min Delta:</strong> {{ compliance.discrimination.expected_min }} kg</p>
+        <p class="test-status"><strong>Discrimination Status:</strong> <span class="status-{{ compliance.discrimination.status.value | lower }}">{{ compliance.discrimination.status.value }}</span></p>
+
+        <h3>Linearity Test</h3>
+        <table class="results-table">
+            <thead>
+                <tr>
+                    <th>Point</th>
+                    <th>Applied Load (kg)</th>
+                    <th>Indication (kg)</th>
+                    <th>Error (kg)</th>
+                    <th>MPE (kg)</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in compliance.linearity.rows %}
+                <tr>
+                    <td>{{ row.label }}</td>
+                    <td>{{ row.applied_load }}</td>
+                    <td>{{ row.indication }}</td>
+                    <td>{{ row.error }}</td>
+                    <td>{{ row.mpe }}</td>
+                    <td class="status-{{ row.status.value | lower }}">{{ row.status.value }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p class="test-status"><strong>Linearity Status:</strong> <span class="status-{{ compliance.linearity.status.value | lower }}">{{ compliance.linearity.status.value }}</span></p>
+    </div>
+
+    <div class="section overall-verdict">
+        <h2>Overall Compliance Verdict</h2>
+        <div class="verdict-badge status-{{ compliance.overall.value | lower }}">
+            {{ compliance.overall.value }}
+        </div>
+    </div>
+
+    {% if session.attachments %}
+    <div class="section attachments">
+        <h2>Attachments</h2>
+        <ul>
+            {% for attachment in session.attachments %}
+            <li>{{ attachment.file_name }} ({{ attachment.file_size }})</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <div class="section signature-section">
+        <div class="signature-box">
+            <p><strong>Tester Signature</strong></p>
+            <div class="signature-line"></div>
+            <p>{{ session.tester }}</p>
+        </div>
+        <div class="signature-box">
+            <p><strong>Reviewer Signature</strong></p>
+            <div class="signature-line"></div>
+        </div>
+    </div>
+</body>
+</html>

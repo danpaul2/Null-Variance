@@ -1,0 +1,146 @@
+@page {
+    size: A4;
+    margin: 20mm;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    font-size: 10pt;
+    line-height: 1.5;
+    color: #333;
+}
+
+h1, h2, h3 {
+    color: #2c3e50;
+}
+
+h1 {
+    font-size: 18pt;
+    text-align: center;
+    border-bottom: 2px solid #2c3e50;
+    padding-bottom: 10px;
+}
+
+h2 {
+    font-size: 14pt;
+    margin-top: 20px;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 5px;
+}
+
+h3 {
+    font-size: 12pt;
+    margin-top: 15px;
+}
+
+.header p {
+    margin: 5px 0;
+}
+
+.section {
+    margin-bottom: 20px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 15px;
+}
+
+table, th, td {
+    border: 1px solid #bdc3c7;
+}
+
+th, td {
+    padding: 8px;
+    text-align: left;
+}
+
+th {
+    background-color: #ecf0f1;
+    font-weight: bold;
+}
+
+.results-table th {
+    text-align: center;
+}
+
+.results-table td {
+    text-align: center;
+}
+
+tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+/* Status colors */
+.status-pass {
+    color: #27ae60;
+    font-weight: bold;
+}
+
+.status-fail {
+    color: #e74c3c;
+    font-weight: bold;
+}
+
+.status-pending {
+    color: #7f8c8d;
+    font-style: italic;
+}
+
+.test-status {
+    text-align: right;
+    font-size: 11pt;
+    margin-top: -10px;
+    margin-bottom: 20px;
+}
+
+.overall-verdict {
+    text-align: center;
+    margin-top: 40px;
+    page-break-inside: avoid;
+}
+
+.verdict-badge {
+    display: inline-block;
+    padding: 10px 20px;
+    font-size: 16pt;
+    font-weight: bold;
+    border: 2px solid;
+    border-radius: 5px;
+}
+
+.verdict-badge.status-pass {
+    border-color: #27ae60;
+    background-color: #eafaf1;
+}
+
+.verdict-badge.status-fail {
+    border-color: #e74c3c;
+    background-color: #fdedec;
+}
+
+.verdict-badge.status-pending {
+    border-color: #95a5a6;
+    background-color: #f2f4f4;
+}
+
+.signature-section {
+    margin-top: 50px;
+    display: table;
+    width: 100%;
+    page-break-inside: avoid;
+}
+
+.signature-box {
+    display: table-cell;
+    width: 50%;
+    text-align: center;
+}
+
+.signature-line {
+    border-bottom: 1px solid #000;
+    width: 80%;
+    margin: 40px auto 10px auto;
+}

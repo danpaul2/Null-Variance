@@ -10,5 +10,13 @@ export default defineConfig({
   optimizeDeps: {
     esbuildOptions: { loader: { ".JSX": "jsx", ".js": "jsx" } },
   },
-  server: { open: true },
+  server: {
+    open: true,
+    proxy: {
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
+    },
+  },
 });

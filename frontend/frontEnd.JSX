@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import API from "./src/api/client";
 
 /* ---------------------------------------------------------------------- */
 /* Constants                                                               */
@@ -31,25 +32,44 @@ const LINEARITY_POINTS = [
 /* Calculation helpers                                                    */
 /* ---------------------------------------------------------------------- */
 
-function computeMPE(load, e) {
+function computeMPE(load, e, accuracyClass = "CLASS_III") {
   const l = parseFloat(load);
   const eVal = parseFloat(e);
   if (isNaN(l) || isNaN(eVal) || eVal <= 0) return null;
-  const n = l / eVal;
+  const m = l / eVal; // number of verification scale intervals (m = L / e)
+
+  const cls = (accuracyClass || "CLASS_III").toUpperCase();
   let multiplier = 0.5;
-  if (n > 200000) multiplier = 1.5;
-  else if (n > 50000) multiplier = 1.0;
+
+  if (cls.includes("CLASS_I") && !cls.includes("CLASS_II")) {
+    // Class I (Special): 0 to 50000 -> 0.5e, 50000 to 200000 -> 1.0e, > 200000 -> 1.5e
+    if (m > 200000) multiplier = 1.5;
+    else if (m > 50000) multiplier = 1.0;
+  } else if (cls.includes("CLASS_II") && !cls.includes("CLASS_III")) {
+    // Class II (High): 0 to 5000 -> 0.5e, 5000 to 20000 -> 1.0e, > 20000 -> 1.5e
+    if (m > 20000) multiplier = 1.5;
+    else if (m > 5000) multiplier = 1.0;
+  } else if (cls.includes("CLASS_IIII")) {
+    // Class IIII (Ordinary): 0 to 50 -> 0.5e, 50 to 200 -> 1.0e, > 200 -> 1.5e
+    if (m > 200) multiplier = 1.5;
+    else if (m > 50) multiplier = 1.0;
+  } else {
+    // Class III (Medium): 0 to 500 -> 0.5e, 500 to 2000 -> 1.0e, > 2000 -> 1.5e
+    if (m > 2000) multiplier = 1.5;
+    else if (m > 500) multiplier = 1.0;
+  }
+
   return eVal * multiplier;
 }
 
-function computeReading(load, indication, e) {
+function computeReading(load, indication, e, accuracyClass = "CLASS_III") {
   const l = parseFloat(load);
   const i = parseFloat(indication);
   const hasL = !isNaN(l);
   const hasI = !isNaN(i);
   let error = null;
   if (hasL && hasI) error = i - l;
-  const mpe = hasL ? computeMPE(load, e) : null;
+  const mpe = hasL ? computeMPE(load, e, accuracyClass) : null;
   let status = "PENDING";
   if (error !== null && mpe !== null) status = Math.abs(error) <= mpe ? "PASS" : "FAIL";
   return { error, mpe, status };
@@ -63,12 +83,22 @@ function aggregateStatus(statuses) {
 }
 
 function getSessionCompliance(session, instrument) {
-  const e = instrument ? instrument.eValue : null;
+  const e = instrument ? (instrument.eValue ?? instrument.e_value) : null;
+  let accClass = "CLASS_III";
+  if (instrument) {
+    if (instrument.accuracyClass) accClass = instrument.accuracyClass;
+    else if (instrument.accuracy_class) accClass = instrument.accuracy_class;
+    else if (instrument.category) {
+      if (instrument.category.includes("Class I") && !instrument.category.includes("Class II")) accClass = "CLASS_I";
+      else if (instrument.category.includes("Class II") && !instrument.category.includes("Class III")) accClass = "CLASS_II";
+      else if (instrument.category.includes("Class IIII")) accClass = "CLASS_IIII";
+    }
+  }
 
   const eccRows = session.eccentricity.rows.map((r) => ({
     ...r,
     appliedLoad: session.eccentricity.testLoad,
-    ...computeReading(session.eccentricity.testLoad, r.indication, e),
+    ...computeReading(session.eccentricity.testLoad, r.indication, e, accClass),
   }));
   const eccStatus = aggregateStatus(eccRows.map((r) => r.status));
 
@@ -79,7 +109,7 @@ function getSessionCompliance(session, instrument) {
   let repStatus = "PENDING";
   if (repFilled) {
     repRange = Math.max(...repIndications) - Math.min(...repIndications);
-    repMpe = computeMPE(session.repeatability.testLoad, e);
+    repMpe = computeMPE(session.repeatability.testLoad, e, accClass);
     if (repMpe !== null) repStatus = repRange <= repMpe ? "PASS" : "FAIL";
   }
 
@@ -98,7 +128,7 @@ function getSessionCompliance(session, instrument) {
 
   const linRows = session.linearity.rows.map((r) => ({
     ...r,
-    ...computeReading(r.appliedLoad, r.indication, e),
+    ...computeReading(r.appliedLoad, r.indication, e, accClass),
   }));
   const linStatus = aggregateStatus(linRows.map((r) => r.status));
 
@@ -134,11 +164,12 @@ function formatFileSize(bytes) {
 /* ---------------------------------------------------------------------- */
 
 const initialInstruments = [
-  { id: "INST-0001", manufacturer: "Essae Digitronics", model: "ED-II 30", category: "Class III - Retail", maxCapacity: 30, eValue: 0.01, owner: "Sunrise Traders", location: "Whitefield, Bengaluru" },
-  { id: "INST-0002", manufacturer: "Avery India", model: "AK-500", category: "Class III - Industrial", maxCapacity: 500, eValue: 0.1, owner: "Karnataka Foods Pvt Ltd", location: "Peenya Industrial Area" },
-  { id: "INST-0003", manufacturer: "Mettler-Toledo", model: "XPR-2002", category: "Class II - Laboratory", maxCapacity: 2, eValue: 0.0001, owner: "BioAnalytics Lab", location: "Electronic City" },
-  { id: "INST-0004", manufacturer: "Contech Instruments", model: "CT-Pro 60", category: "Class III - Retail", maxCapacity: 60, eValue: 0.02, owner: "Metro Supermarket", location: "Indiranagar" },
-  { id: "INST-0005", manufacturer: "Aczet Pvt Ltd", model: "ACZ-220", category: "Class III - Retail", maxCapacity: 220, eValue: 0.05, owner: "Green Valley Mart", location: "HSR Layout" },
+  { id: "INST-0001", manufacturer: "Essae Digitronics", model: "ED-II 30", category: "Class III - Medium (Retail)", maxCapacity: 30, eValue: 0.01, owner: "Sunrise Traders", location: "Whitefield, Bengaluru" },
+  { id: "INST-0002", manufacturer: "Avery India", model: "AK-500", category: "Class III - Medium (Industrial)", maxCapacity: 500, eValue: 0.1, owner: "Karnataka Foods Pvt Ltd", location: "Peenya Industrial Area" },
+  { id: "INST-0003", manufacturer: "Mettler-Toledo", model: "XPR-2002", category: "Class II - High (Laboratory)", maxCapacity: 2, eValue: 0.0001, owner: "BioAnalytics Lab", location: "Electronic City" },
+  { id: "INST-0004", manufacturer: "Sartorius", model: "Cubis II Micro", category: "Class I - Special (Precision / Analytical)", maxCapacity: 0.0021, eValue: 0.000001, owner: "Precision Nanotech R&D", location: "Cleanroom 1, Bengaluru" },
+  { id: "INST-0005", manufacturer: "Contech Instruments", model: "CT-Pro 60", category: "Class III - Medium (Retail)", maxCapacity: 60, eValue: 0.02, owner: "Metro Supermarket", location: "Indiranagar" },
+  { id: "INST-0006", manufacturer: "Aczet Pvt Ltd", model: "ACZ-220", category: "Class III - Medium (Retail)", maxCapacity: 220, eValue: 0.05, owner: "Green Valley Mart", location: "HSR Layout" },
 ];
 
 const initialSessions = [
@@ -566,7 +597,7 @@ function LoginPage({ onLogin }) {
   const [role, setRole] = useState("inspector");
 
   const submitLogin = () => {
-    onLogin({ username: username.trim() || (role === "inspector" ? "R. Mehta" : "K. Verma"), role });
+    onLogin({ username: username.trim() || (role === "inspector" ? "R. Mehta" : "K. Verma"), password: password.trim(), role });
   };
 
   const handleKeyDown = (e) => {
@@ -577,7 +608,7 @@ function LoginPage({ onLogin }) {
   };
 
   const quickLogin = (quickRole) => {
-    onLogin({ username: quickRole === "inspector" ? "R. Mehta" : "K. Verma", role: quickRole });
+    onLogin({ username: quickRole === "inspector" ? "R. Mehta" : "K. Verma", password: "password123", role: quickRole });
   };
 
   return (
@@ -671,7 +702,7 @@ function DashboardPage({ instruments, sessions, activityLog }) {
 function InstrumentsPage({ instruments, sessions, onRegister, selectedInstrumentId, onSelectInstrument, onStartSession, onOpenSession }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [formState, setFormState] = useState({ manufacturer: "", model: "", category: "Class III - Retail", maxCapacity: "", eValue: "", owner: "", location: "" });
+  const [formState, setFormState] = useState({ manufacturer: "", model: "", category: "Class III - Medium (Retail)", maxCapacity: "", eValue: "", owner: "", location: "" });
 
   const filtered = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -692,7 +723,7 @@ function InstrumentsPage({ instruments, sessions, onRegister, selectedInstrument
   const handleRegister = (e) => {
     e.preventDefault();
     onRegister(formState);
-    setFormState({ manufacturer: "", model: "", category: "Class III - Retail", maxCapacity: "", eValue: "", owner: "", location: "" });
+    setFormState({ manufacturer: "", model: "", category: "Class III - Medium (Retail)", maxCapacity: "", eValue: "", owner: "", location: "" });
     setShowForm(false);
   };
 
@@ -770,11 +801,13 @@ function InstrumentsPage({ instruments, sessions, onRegister, selectedInstrument
               <input required value={formState.model} onChange={handleFormChange("model")} placeholder="e.g. AK-500" />
             </div>
             <div className="form-group">
-              <label>Category</label>
+              <label>Category / Accuracy Class</label>
               <select value={formState.category} onChange={handleFormChange("category")}>
-                <option>Class III - Retail</option>
-                <option>Class III - Industrial</option>
-                <option>Class II - Laboratory</option>
+                <option>Class I - Special (Precision / Analytical)</option>
+                <option>Class II - High (Laboratory)</option>
+                <option>Class III - Medium (Retail)</option>
+                <option>Class III - Medium (Industrial)</option>
+                <option>Class IIII - Ordinary</option>
               </select>
             </div>
             <div className="form-group">
@@ -1194,9 +1227,30 @@ function ComplianceResultsPage({ session, instrument, onBack, onProceed }) {
 
 function ReportPreviewPage({ session, instrument, role, onBack, onSubmitForReview, onApprove, onReject }) {
   const compliance = useMemo(() => getSessionCompliance(session, instrument), [session, instrument]);
+  const [downloading, setDownloading] = useState(null);
 
-  const handleDownload = (type) => {
-    alert(`Generating ${type} report for ${session.id}... (backend integration pending)`);
+  const handleDownload = async (type) => {
+    try {
+      setDownloading(type);
+      const endpoint = type === "PDF" ? "pdf" : "docx";
+      const res = await API.get(`/reports/${session.id}/${endpoint}`, { responseType: "blob" });
+      const ext = type === "PDF" ? "pdf" : "docx";
+      const mime = type === "PDF" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      const blob = new Blob([res.data], { type: mime });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${session.id}_OIML_R76_Report.${ext}`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(`Download error for ${type}:`, err);
+      alert(`Could not download ${type} report. Please check server status.`);
+    } finally {
+      setDownloading(null);
+    }
   };
 
   return (
@@ -1204,7 +1258,7 @@ function ReportPreviewPage({ session, instrument, role, onBack, onSubmitForRevie
       <div className="session-header">
         <div>
           <h3 className="panel-title">NAWI Test Report - {session.id}</h3>
-          <p className="session-subtitle">Generated per OIML R-76</p>
+          <p className="session-subtitle">Generated per OIML R-76 International Recommendation</p>
         </div>
         <div className="report-badges">
           <WorkflowBadge status={session.status} />
@@ -1214,8 +1268,8 @@ function ReportPreviewPage({ session, instrument, role, onBack, onSubmitForRevie
 
       <div className="detail-grid">
         <div><span className="detail-label">Instrument</span><span>{instrument ? `${instrument.id} (${instrument.manufacturer} ${instrument.model})` : "Not found"}</span></div>
-        <div><span className="detail-label">Category</span><span>{instrument ? instrument.category : "-"}</span></div>
-        <div><span className="detail-label">Max Capacity / e</span><span>{instrument ? `${instrument.maxCapacity} kg / ${instrument.eValue} kg` : "-"}</span></div>
+        <div><span className="detail-label">Category / Accuracy Class</span><span>{instrument ? (instrument.category || instrument.accuracy_class) : "-"}</span></div>
+        <div><span className="detail-label">Max Capacity / e</span><span>{instrument ? `${instrument.maxCapacity ?? instrument.max_capacity} kg / ${instrument.eValue ?? instrument.e_value} kg` : "-"}</span></div>
         <div><span className="detail-label">Owner / Facility</span><span>{instrument ? instrument.owner : "-"}</span></div>
         <div><span className="detail-label">Tester</span><span>{session.tester}</span></div>
         <div><span className="detail-label">Test Date</span><span>{session.testDate}</span></div>
@@ -1268,8 +1322,12 @@ function ReportPreviewPage({ session, instrument, role, onBack, onSubmitForRevie
 
       <div className="form-actions">
         <button className="btn btn-secondary" onClick={onBack}>Back</button>
-        <button className="btn btn-secondary" onClick={() => handleDownload("PDF")}>Download PDF</button>
-        <button className="btn btn-secondary" onClick={() => handleDownload("Word")}>Download Word</button>
+        <button className="btn btn-secondary" disabled={downloading !== null} onClick={() => handleDownload("PDF")}>
+          {downloading === "PDF" ? "Generating PDF..." : "📥 Download PDF"}
+        </button>
+        <button className="btn btn-secondary" disabled={downloading !== null} onClick={() => handleDownload("Word")}>
+          {downloading === "Word" ? "Generating Word..." : "📥 Download Word (.docx)"}
+        </button>
         {role === "inspector" && session.status === "DRAFT" && (
           <button className="btn btn-primary" onClick={onSubmitForReview}>Submit for Review</button>
         )}
@@ -1412,7 +1470,14 @@ function ReviewerQueuePage({ instruments, sessions, onOpenSession, onApprove, on
 /* ---------------------------------------------------------------------- */
 
 export default function NawiPortalApp() {
-  const [auth, setAuth] = useState({ loggedIn: false, role: "inspector", username: "" });
+  const [auth, setAuth] = useState(() => {
+    try {
+      const u = localStorage.getItem("nawi_user");
+      const t = localStorage.getItem("nawi_token");
+      if (u && t) return JSON.parse(u);
+    } catch {}
+    return { loggedIn: false, role: "inspector", username: "" };
+  });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentPage, setCurrentPage] = useState("dashboard");
   const [instruments, setInstruments] = useState(initialInstruments);
@@ -1424,17 +1489,131 @@ export default function NawiPortalApp() {
   const [preselectedInstrumentId, setPreselectedInstrumentId] = useState(null);
   const [instrumentCounter, setInstrumentCounter] = useState(initialInstruments.length);
   const [sessionCounter, setSessionCounter] = useState(initialSessions.length);
+  const [useBackend, setUseBackend] = useState(true);
+
+  /* ---- Data fetching helpers ---- */
+
+  const fetchInstruments = useCallback(async () => {
+    try {
+      const res = await API.get("/instruments");
+      setInstruments(res.data);
+      setInstrumentCounter(res.data.length);
+    } catch {
+      /* backend unavailable — keep current state */
+    }
+  }, []);
+
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await API.get("/sessions");
+      /* Map backend snake_case fields to frontend camelCase */
+      const mapped = res.data.map((s) => ({
+        id: s.id,
+        instrumentId: s.instrument_id,
+        tester: s.tester,
+        testDate: s.test_date,
+        labLocation: s.lab_location,
+        temp: s.temperature,
+        humidity: s.humidity,
+        status: s.status,
+        rejectionReason: s.rejection_reason || null,
+        eccentricity: {
+          testLoad: s.eccentricity?.test_load || "",
+          rows: (s.eccentricity?.rows || []).map((r) => ({ id: r.id, label: r.label, indication: r.indication || "" })),
+        },
+        repeatability: {
+          testLoad: s.repeatability?.test_load || "",
+          rows: (s.repeatability?.rows || []).map((r) => ({ id: r.id, label: r.label, indication: r.indication || "" })),
+        },
+        discrimination: {
+          testLoad: s.discrimination?.test_load || "",
+          readingBefore: s.discrimination?.reading_before || "",
+          increment: s.discrimination?.increment || "",
+          readingAfter: s.discrimination?.reading_after || "",
+        },
+        linearity: {
+          rows: (s.linearity?.rows || []).map((r) => ({
+            id: r.id,
+            label: r.label,
+            appliedLoad: r.applied_load || "",
+            indication: r.indication || "",
+          })),
+        },
+        attachments: (s.attachments || []).map((a) => ({
+          id: a.id,
+          name: a.file_name,
+          size: a.file_size || "",
+        })),
+      }));
+      setSessions(mapped);
+      setSessionCounter(mapped.length);
+    } catch {
+      /* backend unavailable */
+    }
+  }, []);
+
+  const fetchActivity = useCallback(async () => {
+    try {
+      const res = await API.get("/activity");
+      setActivityLog(res.data);
+    } catch {
+      /* backend unavailable */
+    }
+  }, []);
+
+  const refreshAll = useCallback(() => {
+    fetchInstruments();
+    fetchSessions();
+    fetchActivity();
+  }, [fetchInstruments, fetchSessions, fetchActivity]);
+
+  /* ---- Load data after login ---- */
+  useEffect(() => {
+    if (auth.loggedIn && useBackend) {
+      refreshAll();
+    }
+  }, [auth.loggedIn, useBackend, refreshAll]);
 
   const logActivity = (text) => {
+    if (useBackend) {
+      API.post("/activity", null, { params: { text, user: auth.username || "User" } }).catch(() => {});
+    }
     setActivityLog((prev) => [{ time: "Just now", text }, ...prev]);
   };
 
-  const handleLogin = ({ username, role }) => {
-    setAuth({ loggedIn: true, role, username });
+  /* ---- Auth ---- */
+
+  const handleLogin = async ({ username, password, role }) => {
+    let email = (username && username.includes("@")) ? username.trim() : (role === "inspector" ? "mehta@lab.in" : "verma@lab.in");
+    if (username && username.toLowerCase().includes("darshan")) {
+      email = "darshanreddy1906@gmail.com";
+    }
+    const pwd = password || "password123";
+
+    if (useBackend) {
+      try {
+        const res = await API.post("/auth/login", { email, password: pwd });
+        localStorage.setItem("nawi_token", res.data.access_token);
+        const userObj = { loggedIn: true, role: res.data.role.toLowerCase(), username: res.data.username || username };
+        localStorage.setItem("nawi_user", JSON.stringify(userObj));
+        setAuth(userObj);
+        setCurrentPage("dashboard");
+        return;
+      } catch (err) {
+        console.warn("Backend auth failed, continuing with local session:", err);
+      }
+    }
+    const userObj = { loggedIn: true, role, username: username.trim() || (role === "inspector" ? "R. Mehta" : "K. Verma") };
+    localStorage.setItem("nawi_user", JSON.stringify(userObj));
+    setAuth(userObj);
     setCurrentPage("dashboard");
   };
 
-  const handleLogout = () => setAuth({ loggedIn: false, role: "inspector", username: "" });
+  const handleLogout = () => {
+    localStorage.removeItem("nawi_token");
+    localStorage.removeItem("nawi_user");
+    setAuth({ loggedIn: false, role: "inspector", username: "" });
+  };
 
   const navigate = (page) => {
     setSelectedInstrumentId(null);
@@ -1442,7 +1621,31 @@ export default function NawiPortalApp() {
     setCurrentPage(page);
   };
 
-  const handleRegisterInstrument = (formState) => {
+  /* ---- Instruments ---- */
+
+  const handleRegisterInstrument = async (formState) => {
+    let accClass = "CLASS_III";
+    if (formState.category.includes("Class I") && !formState.category.includes("Class II")) accClass = "CLASS_I";
+    else if (formState.category.includes("Class II") && !formState.category.includes("Class III")) accClass = "CLASS_II";
+    else if (formState.category.includes("Class IIII")) accClass = "CLASS_IIII";
+
+    if (useBackend) {
+      try {
+        await API.post("/instruments", {
+          manufacturer: formState.manufacturer,
+          model: formState.model,
+          category: formState.category,
+          max_capacity: parseFloat(formState.maxCapacity) || 0,
+          e_value: parseFloat(formState.eValue) || 0,
+          owner: formState.owner,
+          location: formState.location,
+          accuracy_class: accClass,
+        });
+        fetchInstruments();
+        fetchActivity();
+        return;
+      } catch { /* fall through */ }
+    }
     const nextNum = instrumentCounter + 1;
     const id = `INST-${String(nextNum).padStart(4, "0")}`;
     const newInstrument = {
@@ -1460,12 +1663,31 @@ export default function NawiPortalApp() {
     logActivity(`${auth.username || "A user"} registered new instrument ${id}`);
   };
 
+  /* ---- Sessions ---- */
+
   const handleStartSession = (instrumentId) => {
     setPreselectedInstrumentId(instrumentId);
     setCurrentPage("newSession");
   };
 
-  const handleCreateSession = (sessionInfo) => {
+  const handleCreateSession = async (sessionInfo) => {
+    if (useBackend) {
+      try {
+        const res = await API.post("/sessions", {
+          instrument_id: sessionInfo.instrumentId,
+          tester: sessionInfo.tester,
+          test_date: sessionInfo.testDate,
+          lab_location: sessionInfo.labLocation,
+          temperature: sessionInfo.temp,
+          humidity: sessionInfo.humidity,
+        });
+        await fetchSessions();
+        setSelectedSessionId(res.data.id);
+        fetchActivity();
+        setCurrentPage("testEntry");
+        return;
+      } catch { /* fall through */ }
+    }
     const nextNum = sessionCounter + 1;
     const id = `TS-2026-${String(nextNum).padStart(4, "0")}`;
     const newSession = {
@@ -1488,6 +1710,36 @@ export default function NawiPortalApp() {
 
   const updateSession = (sessionId, patchFn) => {
     setSessions((prev) => prev.map((s) => (s.id === sessionId ? patchFn(s) : s)));
+    /* Debounced save to backend */
+    if (useBackend) {
+      const updated = patchFn(sessions.find((s) => s.id === sessionId));
+      if (updated) {
+        API.put(`/sessions/${sessionId}`, {
+          eccentricity: {
+            test_load: updated.eccentricity?.testLoad || "",
+            rows: (updated.eccentricity?.rows || []).map((r) => ({ id: r.id, label: r.label, indication: r.indication || "" })),
+          },
+          repeatability: {
+            test_load: updated.repeatability?.testLoad || "",
+            rows: (updated.repeatability?.rows || []).map((r) => ({ id: r.id, label: r.label, indication: r.indication || "" })),
+          },
+          discrimination: {
+            test_load: updated.discrimination?.testLoad || "",
+            reading_before: updated.discrimination?.readingBefore || "",
+            increment: updated.discrimination?.increment || "",
+            reading_after: updated.discrimination?.readingAfter || "",
+          },
+          linearity: {
+            rows: (updated.linearity?.rows || []).map((r) => ({
+              id: r.id,
+              label: r.label,
+              applied_load: r.appliedLoad || "",
+              indication: r.indication || "",
+            })),
+          },
+        }).catch(() => {});
+      }
+    }
   };
 
   const handleOpenSession = (sessionId, mode, from) => {
@@ -1496,26 +1748,59 @@ export default function NawiPortalApp() {
     setCurrentPage(mode === "edit" ? "testEntry" : "reportPreview");
   };
 
-  const handleSubmitForReview = () => {
+  /* ---- Workflow transitions ---- */
+
+  const handleSubmitForReview = async () => {
+    if (useBackend) {
+      try {
+        await API.patch(`/sessions/${selectedSessionId}/submit`);
+        fetchSessions();
+        fetchActivity();
+        setCurrentPage("reportRepository");
+        return;
+      } catch { /* fall through */ }
+    }
     const session = sessions.find((s) => s.id === selectedSessionId);
     updateSession(selectedSessionId, (s) => ({ ...s, status: "PENDING_REVIEW" }));
     logActivity(`${session ? session.tester : "Inspector"} submitted test session ${selectedSessionId} for review`);
     setCurrentPage("reportRepository");
   };
 
-  const handleApprove = (sessionId) => {
+  const handleApprove = async (sessionId) => {
     const id = sessionId || selectedSessionId;
+    if (useBackend) {
+      try {
+        await API.patch(`/sessions/${id}/approve`);
+        fetchSessions();
+        fetchActivity();
+        if (!sessionId) setCurrentPage(returnPage);
+        return;
+      } catch { /* fall through */ }
+    }
     updateSession(id, (s) => ({ ...s, status: "APPROVED" }));
     logActivity(`Reviewer approved test session ${id}`);
     if (!sessionId) setCurrentPage(returnPage);
   };
 
-  const handleReject = (sessionId) => {
+  const handleReject = async (sessionId) => {
     const id = sessionId || selectedSessionId;
-    updateSession(id, (s) => ({ ...s, status: "REJECTED" }));
+    const reason = prompt("Enter rejection reason:");
+    if (!reason) return;
+    if (useBackend) {
+      try {
+        await API.patch(`/sessions/${id}/reject`, { rejection_reason: reason });
+        fetchSessions();
+        fetchActivity();
+        if (!sessionId) setCurrentPage(returnPage);
+        return;
+      } catch { /* fall through */ }
+    }
+    updateSession(id, (s) => ({ ...s, status: "REJECTED", rejectionReason: reason }));
     logActivity(`Reviewer rejected test session ${id}`);
     if (!sessionId) setCurrentPage(returnPage);
   };
+
+  /* ---- Login screen ---- */
 
   if (!auth.loggedIn) {
     return (
