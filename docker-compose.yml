@@ -1,22 +1,48 @@
-version: "3.9"
+﻿version: "3.9"
 
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: nawi-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: nawi_user
+      POSTGRES_PASSWORD: nawi_pass
+      POSTGRES_DB: nawidb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - nawi-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nawi_user -d nawidb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build: ./backend
+    container_name: nawi-backend
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
       - backend-uploads:/app/uploads
     environment:
+      - DATABASE_URL=postgresql://nawi_user:nawi_pass@db:5432/nawidb
       - JWT_SECRET_KEY=change-me-in-production
       - JWT_ALGORITHM=HS256
       - JWT_EXPIRE_MINUTES=480
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - nawi-net
 
   frontend:
     image: node:20-slim
+    container_name: nawi-frontend
     working_dir: /app
     ports:
       - "5173:5173"
@@ -30,6 +56,7 @@ services:
       - nawi-net
 
 volumes:
+  postgres-data:
   backend-uploads:
   frontend-node-modules:
 

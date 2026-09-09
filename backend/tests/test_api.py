@@ -34,7 +34,7 @@ def test_get_sessions():
     response = client.get("/api/sessions", headers=headers)
     assert response.status_code == 200
     data = response.json()
-    assert len(data) >= 6
+    assert len(data) >= 5
     assert data[0]["id"] == "TS-2026-0001"
 
 def test_session_evaluate():

@@ -1,9 +1,25 @@
+﻿from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import auth, instruments, sessions, reports, attachments, activity
+from app.db.database import engine, Base, SessionLocal
+from app.db.seed import seed_database
+import app.db.models  # ensure models are registered with Base
 
-app = FastAPI(title="NAWI OIML R-76 Test Report System")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Ensure tables exist (Alembic or create_all for startup convenience)
+    Base.metadata.create_all(bind=engine)
+    # Seed demo data if database is empty
+    with SessionLocal() as db:
+        seed_database(db)
+    yield
+
+app = FastAPI(
+    title="NAWI OIML R-76 Test Report System",
+    lifespan=lifespan
+)
 
 origins = [
     "http://localhost:5173",
